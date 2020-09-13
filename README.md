@@ -9,6 +9,9 @@ module.exports = {
   appID: '',
   appsecret: '',
   token: '',
-  access_token: ''
+  access_token: '',
+  // 配置 js-sdk
+  ticket: '',  // jsapi_ticket
+  nonceStr: '', // 必填，生成签名的随机串
 }
 ```

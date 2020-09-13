@@ -11,16 +11,37 @@ const {
   appID,
   appsecret,
   token,
-  access_token
-} = require('./wechat.dev.config');
+  access_token,
+  ticket,
+  nonceStr
+} = require('../wechat.dev.config');
 
 app.use(express.static(__dirname + '/static'))
+
+//设置模板文件文件夹
+app.set('views', path.resolve(__dirname, './views'))
+//设置视图模板后缀名为 .html, 使用 res.render('xx') 来代替 res.render("xx.html")
+app.set('view engine', 'html');
+//注册 ejs 模板的后缀为 .html
+app.engine('.html', require('ejs').__express);
 
 // 当接收到xml消息后，用xml2js解析xml,根据Event和MsgType做事件类型的判断，并做相应的处理，最后，res.send(xml)发送数据的时候也是要一个xml格式的数据
 const parser = new xml2js.Parser({ trim: true, explicitArray: false, explicitRoot: false });
 const builder = new xml2js.Builder({ headless: true, cdata: true, explicitRoot: false, rootName: 'xml' });
 
-// 请求获取 access_token 接口: GET https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=APPID&secret=APPSECRET
+// 接口: GET https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=APPID&secret=APPSECRET
+const getAccessToken = () => {
+  rp({
+    uri: `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${appID}&secret=${appsecret}`,
+    json: true
+  }).then(res => {
+    console.log('返回值', res);
+  }).catch(err => {
+    console.log('请求 accessToken 失败', err);
+  })
+}
+// 获取 access_token
+// getAccessToken()
 
 const createMenu = () => {
   rp({
@@ -28,26 +49,16 @@ const createMenu = () => {
     uri: `https://api.weixin.qq.com/cgi-bin/menu/create?access_token=${access_token}`,
     body: {
       "button":[
-        {	
-          "type":"click",
-          "name":"今日歌曲1",
-          "key":"V1001_TODAY_MUSIC"
+        {
+          "type":"view",
+          "name":"测试环境",
+          "url": `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${appID}&redirect_uri=http://8e6649f77089.ngrok.io/chat&response_type=code&scope=snsapi_userinfo&state=STATE#wechat_redirect`
         },
         {
-          "name":"菜单1",
-          "sub_button":[
-            {	
-              "type":"view",
-              "name":"搜索",
-              "url":"http://www.soso.com/"
-            },
-            {
-              "type":"click",
-              "name":"赞一下我们",
-              "key":"V1001_GOOD"
-            }
-          ]
-        }
+          "type":"view",
+          "name":"百度",
+          "url": "https://www.baidu.com"
+        },
       ]
     },
     json: true
@@ -163,6 +174,54 @@ app.post('/wx', function (req, res) {
   });
 })
 
-app.listen(80, function () {
-  console.log(`app listening on port 80!`);
+app.get('/chat', async function (req, res) {
+  const { code } = req.query;  // 得到 code 和上面的 state 参数
+
+  // 获取网页授权的 access_token, 不是上面的 access_token
+  const accessTokenRes = await rp({
+    uri: `https://api.weixin.qq.com/sns/oauth2/access_token?appid=${appID}&secret=${appsecret}&code=${code}&grant_type=authorization_code`,
+    json: true
+  })
+  if(!accessTokenRes || !accessTokenRes.access_token) {
+    res.send('获取 access token 错误')
+  }
+  const { access_token: inner_access_token, openid, refresh_token } = accessTokenRes;
+
+  // 获取用户信息
+  const userInfoRes = await rp({
+    uri: `https://api.weixin.qq.com/sns/userinfo?access_token=${inner_access_token}&openid=${openid}&lang=zh_CN`,
+    json: true
+  })
+
+  if(!userInfoRes || !userInfoRes.nickname) {
+    res.send('获取用户信息错误')
+  }
+  const { nickname, city, province } = userInfoRes;
+
+  let newTicket = '';
+  if(!ticket) {
+    const jsApiticketRes = await rp({
+      uri: `https://api.weixin.qq.com/cgi-bin/ticket/getticket?access_token=${access_token}&type=jsapi`,
+      json: true
+    })
+    newTicket = jsApiticketRes.ticket;
+  } else {
+    newTicket = ticket;
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const url = `http://8e6649f77089.ngrok.io/chat?code=${code}&state=STATE`;
+  const signature = sha1(`jsapi_ticket=${newTicket}&noncestr=${nonceStr}&timestamp=${timestamp}&url=${url}`)
+
+  res.render('index', {
+    nickname,
+    signature,
+    nonceStr,
+    timestamp,
+    appID
+  })
+})
+
+app.listen(8082, function () {
+  console.log(`app listening on port 8082!`);
 })
